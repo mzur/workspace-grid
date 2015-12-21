@@ -1,5 +1,5 @@
 /***********************************************************************
- * Copyright (C)      2015 Foivos S. Zakkak <foivos@zakkak.net         *
+ * Copyright (C) 2015, 2018 Foivos S. Zakkak <foivos@zakkak.net        *
  * Copyright (C) 2012-2014 Amy Chan <mathematical.coffee@gmail.com>    *
  *                                                                     *
  * This program is free software: you can redistribute it and/or       *
@@ -47,6 +47,7 @@ var KEY_MAX_HFRACTION_COLLAPSE = 'max-screen-fraction-before-collapse';
 var KEY_SHOW_WORKSPACE_LABELS = 'show-workspace-labels';
 var KEY_RELATIVE_WORKSPACE_SWITCHING ="relative-workspace-switching";
 var KEY_SCROLL_DIRECTION = 'scroll-direction';
+var KEY_SHOW_WORKSPACE_THUMBNAILS = 'show-workspace-thumbnails';
 
 function init() {
     Convenience.initTranslations();
@@ -111,6 +112,9 @@ const WorkspaceGridPrefsWidget = new GObject.Class({
         this.addTextComboBox("Scroll Direction: ", KEY_SCROLL_DIRECTION,
             [ { name: "Horizontal", value: "horizontal"},
               { name: "Vertical", value: "vertical" } ]);
+
+        this.addBoolean(_("Show workspace thumbnails in the switcher?"),
+            KEY_SHOW_WORKSPACE_THUMBNAILS);
 
         item = new Gtk.Label({
             label: _("The following settings determine how much horizontal " +

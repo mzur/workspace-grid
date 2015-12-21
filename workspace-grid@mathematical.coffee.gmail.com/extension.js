@@ -1,5 +1,5 @@
 /***********************************************************************
- * Copyright (C)      2015 Foivos S. Zakkak <foivos@zakkak.net>        *
+ * Copyright (C) 2015, 2018 Foivos S. Zakkak <foivos@zakkak.net>       *
  * Copyright (C) 2012-2014 Amy Chan <mathematical.coffee@gmail.com>    *
  *                                                                     *
  * This program is free software: you can redistribute it and/or       *
@@ -160,6 +160,7 @@ const KEY_MAX_HFRACTION = Prefs.KEY_MAX_HFRACTION;
 const KEY_MAX_HFRACTION_COLLAPSE = Prefs.KEY_MAX_HFRACTION_COLLAPSE;
 const KEY_SHOW_WORKSPACE_LABELS = Prefs.KEY_SHOW_WORKSPACE_LABELS;
 const KEY_SCROLL_DIRECTION = Prefs.KEY_SCROLL_DIRECTION;
+const KEY_SHOW_WORKSPACE_THUMBNAILS = Prefs.KEY_SHOW_WORKSPACE_THUMBNAILS;
 
 const OVERRIDE_SCHEMA = 'org.gnome.shell.overrides'
 
