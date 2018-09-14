@@ -149,16 +149,18 @@ const ExtensionUtils = imports.misc.extensionUtils;
 const Me = ExtensionUtils.getCurrentExtension();
 const Convenience = Me.imports.convenience;
 const Prefs = Me.imports.prefs;
-var MyWorkspaceSwitcherPopup = Me.imports.myWorkspaceSwitcherPopup;
+const MyWorkspaceSwitcherPopup = Me.imports.myWorkspaceSwitcherPopup;
 
-var KEY_ROWS = Prefs.KEY_ROWS;
-var KEY_COLS = Prefs.KEY_COLS;
-var KEY_WRAPAROUND = Prefs.KEY_WRAPAROUND;
-var KEY_WRAP_TO_SAME = Prefs.KEY_WRAP_TO_SAME;
-var KEY_MAX_HFRACTION = Prefs.KEY_MAX_HFRACTION;
-var KEY_MAX_HFRACTION_COLLAPSE = Prefs.KEY_MAX_HFRACTION_COLLAPSE;
-var KEY_SHOW_WORKSPACE_LABELS = Prefs.KEY_SHOW_WORKSPACE_LABELS;
-var KEY_SHOW_WORKSPACE_THUMBNAILS = Prefs.KEY_SHOW_WORKSPACE_THUMBNAILS;
+const KEY_ROWS = Prefs.KEY_ROWS;
+const KEY_COLS = Prefs.KEY_COLS;
+const KEY_WRAPAROUND = Prefs.KEY_WRAPAROUND;
+const KEY_WRAP_TO_SAME = Prefs.KEY_WRAP_TO_SAME;
+const KEY_WRAP_TO_SAME_SCROLL = Prefs.KEY_WRAP_TO_SAME_SCROLL;
+const KEY_MAX_HFRACTION = Prefs.KEY_MAX_HFRACTION;
+const KEY_MAX_HFRACTION_COLLAPSE = Prefs.KEY_MAX_HFRACTION_COLLAPSE;
+const KEY_SHOW_WORKSPACE_LABELS = Prefs.KEY_SHOW_WORKSPACE_LABELS;
+const KEY_SCROLL_DIRECTION = Prefs.KEY_SCROLL_DIRECTION;
+const KEY_SHOW_WORKSPACE_THUMBNAILS = Prefs.KEY_SHOW_WORKSPACE_THUMBNAILS;
 
 const OVERRIDE_SCHEMA = 'org.gnome.shell.overrides'
 
@@ -253,8 +255,29 @@ function getWorkspaceSwitcherPopup() {
     return Main.wm._workspaceSwitcherPopup;
 }
 
+function calculateScrollDirection(direction, scrollDirection) {
+  if (scrollDirection === 'horizontal') {
+    switch (direction) {
+      case UP:
+        direction = LEFT;
+        break;
+      case DOWN:
+        direction = RIGHT;
+        break;
+    }
+  }
+  return direction;
+}
+
 // calculates the workspace index in that direction.
-function calculateWorkspace(direction, wraparound, wrapToSame) {
+function calculateWorkspace(direction, wraparound, wrapToSame, wrapToSameScroll, overrideScrollDirection) {
+    if (overrideScrollDirection) {
+        direction = calculateScrollDirection(direction, settings.get_string(KEY_SCROLL_DIRECTION));
+        if (!wrapToSameScroll)
+            wrapToSame = wrapToSameScroll;
+   }
+
+
     let from = global.screen.get_active_workspace(),
         to = from.get_neighbor(direction).index();
 
@@ -309,7 +332,16 @@ function calculateWorkspace(direction, wraparound, wrapToSame) {
  *        https://extensions.gnome.org/extension/29/workspace-navigator/)
  */
 function moveWorkspace(direction) {
-    let newWs = actionMoveWorkspace(direction);
+    // This is a boolean passed to the actionMoveWorkspace function.
+    // If overrideScrollDirection is TRUE and scroll-direction is HORIZONTAL,
+    // it overrides the UP and DOWN directions to LEFT and RIGHT.
+    // This boolean defaults to TRUE.
+    //
+    // Here this behaviour is not needed because we are handling the keyboard
+    // arrow shortcuts and all directions are valid. So we will set to FALSE.
+    //
+    let overrideScrollDirection = false;
+    let newWs = actionMoveWorkspace(direction, overrideScrollDirection);
 
     // show workspace switcher
     if (!Main.overview.visible) {
@@ -373,7 +405,7 @@ function showWorkspaceSwitcher(display, screen, window, binding) {
         direction = Meta.MotionDirection.UP;
     } else {
         if (action == 'switch') {
-            newWs = actionMoveWorkspace(direction);
+            newWs = actionMoveWorkspace(direction, false);
         } else {
             newWs = actionMoveWindow(window, direction);
         }
@@ -385,7 +417,7 @@ function showWorkspaceSwitcher(display, screen, window, binding) {
     }
 }
 
-function actionMoveWorkspace(destination) {
+function actionMoveWorkspace(destination, overrideScrollDirection = true) {
     let from = global.screen.get_active_workspace_index();
 
     let to;
@@ -395,7 +427,9 @@ function actionMoveWorkspace(destination) {
     else
         to = calculateWorkspace(destination,
                                 settings.get_boolean(KEY_WRAPAROUND),
-                                settings.get_boolean(KEY_WRAP_TO_SAME));
+                                settings.get_boolean(KEY_WRAP_TO_SAME),
+                                settings.get_boolean(KEY_WRAP_TO_SAME_SCROLL),
+                                overrideScrollDirection);
 
     let ws = global.screen.get_workspace_by_index(to);
 
@@ -459,7 +493,7 @@ function unoverrideKeybindingsAndPopup() {
                                                    Main.wm._showWorkspaceSwitcher));
     }
 
-    _workspaceSwitcherPopup = null;
+    Main.wm._workspaceSwitcherPopup = null;
 }
 
 // GNOME 3.2 & 3.4: Main.overview._workspacesDisplay
@@ -473,7 +507,7 @@ function _getWorkspaceDisplay() {
 /******************
  * Overrides the workspaces display in the overview
  ******************/
-const ThumbnailsBox = new Lang.Class({
+var ThumbnailsBox = new Lang.Class({
     Name: 'ThumbnailsBox',
     Extends: WorkspaceThumbnail.ThumbnailsBox,
 
@@ -490,24 +524,10 @@ const ThumbnailsBox = new Lang.Class({
         this.actor = new Shell.GenericContainer({ reactive: true,
                                                   style_class: 'workspace-thumbnails',
                                                   request_mode: Clutter.RequestMode.WIDTH_FOR_HEIGHT });
-        this.actor.connect('get-preferred-width', Lang.bind(this, this._getPreferredWidth));
-        this.actor.connect('get-preferred-height', Lang.bind(this, this._getPreferredHeight));
-        this.actor.connect('allocate', Lang.bind(this, this._allocate));
+        this.actor.connect('get-preferred-width', this._getPreferredWidth.bind(this));
+        this.actor.connect('get-preferred-height', this._getPreferredHeight.bind(this));
+        this.actor.connect('allocate', this._allocate.bind(this));
         this.actor._delegate = this;
-
-        // When we animate the scale, we don't animate the requested size of the thumbnails, rather
-        // we ask for our final size and then animate within that size. This slightly simplifies the
-        // interaction with the main workspace windows (instead of constantly reallocating them
-        // to a new size, they get a new size once, then use the standard window animation code
-        // allocate the windows to their new positions), however it causes problems for drawing
-        // the background and border wrapped around the thumbnail as we animate - we can't just pack
-        // the container into a box and set style properties on the box since that box would wrap
-        // around the final size not the animating size. So instead we fake the background with
-        // an actor underneath the content and adjust the allocation of our children to leave space
-        // for the border and padding of the background actor.
-//        this._background = new St.Bin({ style_class: 'workspace-thumbnails-background' });
-
-//        this.actor.add_actor(this._background);
 
         let indicator = new St.Bin({ style_class: 'workspace-thumbnail-indicator' });
 
@@ -519,7 +539,7 @@ const ThumbnailsBox = new Lang.Class({
 
         this._dropWorkspace = -1;
         this._dropPlaceholderPos = -1;
-        this._dropPlaceholder = new St.Bin({ style_class: 'workspace-thumbnail-drop-indicator' });
+        this._dropPlaceholder = new St.Bin({ style_class: 'placeholder' });
         this.actor.add_actor(this._dropPlaceholder);
         this._spliceIndex = -1;
 
@@ -536,32 +556,35 @@ const ThumbnailsBox = new Lang.Class({
 
         this._thumbnails = [];
 
-        this.actor.connect('button-press-event', function() { return true; });
-        this.actor.connect('button-release-event', Lang.bind(this, this._onButtonRelease));
+        this.actor.connect('button-press-event', () => Clutter.EVENT_STOP);
+        this.actor.connect('button-release-event', this._onButtonRelease.bind(this));
+        this.actor.connect('touch-event', this._onTouchEvent.bind(this));
 
         // @@ only change: store these IDs! (TODO: submit patch)
         this._signals = [];
         this._signals.push(Main.overview.connect('showing',
-                    Lang.bind(this, this._createThumbnails)));
+                    this._createThumbnails.bind(this)));
         this._signals.push(Main.overview.connect('hidden',
-                    Lang.bind(this, this._destroyThumbnails)));
+                    this._destroyThumbnails.bind(this)));
         this._signals.push(Main.overview.connect('item-drag-begin',
-                    Lang.bind(this, this._onDragBegin)));
+                    this._onDragBegin.bind(this)));
         this._signals.push(Main.overview.connect('item-drag-end',
-                    Lang.bind(this, this._onDragEnd)));
+                    this._onDragEnd.bind(this)));
         this._signals.push(Main.overview.connect('item-drag-cancelled',
-                    Lang.bind(this, this._onDragCancelled)));
+                    this._onDragCancelled.bind(this)));
         this._signals.push(Main.overview.connect('window-drag-begin',
-                    Lang.bind(this, this._onDragBegin)));
+                    this._onDragBegin.bind(this)));
         this._signals.push(Main.overview.connect('window-drag-end',
-                    Lang.bind(this, this._onDragEnd)));
+                    this._onDragEnd.bind(this)));
         this._signals.push(Main.overview.connect('window-drag-cancelled',
-                    Lang.bind(this, this._onDragCancelled)));
+                    this._onDragCancelled.bind(this)));
 
         this._settings = new Gio.Settings({ schema: OVERRIDE_SCHEMA });
         this._dynamicWorkspacesId = this._settings.connect(
                 'changed::dynamic-workspaces',
-                Lang.bind(this, this._updateSwitcherVisibility));
+                this._updateSwitcherVisibility.bind(this));
+
+        Main.layoutManager.connect('monitors-changed', this._rebuildThumbnails.bind(this));
 
         // @@ added
         this._indicatorX = 0; // to match indicatorY
@@ -643,6 +666,7 @@ const ThumbnailsBox = new Lang.Class({
     _activeWorkspaceChanged: function () {
         let thumbnail;
         let activeWorkspace = global.screen.get_active_workspace();
+        log("thumbs length = " + this._thumbnails.length);
         for (let i = 0; i < this._thumbnails.length; i++) {
             if (this._thumbnails[i].metaWorkspace === activeWorkspace) {
                 thumbnail = this._thumbnails[i];
@@ -651,11 +675,6 @@ const ThumbnailsBox = new Lang.Class({
         }
 
         this._animatingIndicator = true;
-        let indicatorThemeNode = this._indicator.get_theme_node(),
-            indicatorTopFullBorder = indicatorThemeNode.get_padding(St.Side.TOP) + indicatorThemeNode.get_border_width(St.Side.TOP),
-            indicatorLeftFullBorder = indicatorThemeNode.get_padding(St.Side.LEFT) + indicatorThemeNode.get_border_width(St.Side.LEFT);
-        this.indicatorX = this._indicator.allocation.x1 + indicatorLeftFullBorder; // <-- added
-        this.indicatorY = this._indicator.allocation.y1 + indicatorTopFullBorder;
         Tweener.addTween(this,
                          { indicatorY: thumbnail.actor.allocation.y1,
                            indicatorX: thumbnail.actor.allocation.x1, // added
@@ -674,7 +693,12 @@ const ThumbnailsBox = new Lang.Class({
         // the size request to our children because we know how big they are and know
         // that the actors aren't depending on the virtual functions being called.
 
-        this._ensurePorthole();
+        if (!this._ensurePorthole()) {
+            alloc.min_size = -1;
+            alloc.natural_size = -1;
+            return;
+        }
+
         let themeNode    = this.actor.get_theme_node();
 
         let spacing      = themeNode.get_length('spacing');
@@ -866,11 +890,11 @@ const ThumbnailsBox = new Lang.Class({
 
                 x += thumbnailWidth + spacing;
                 ++i;
-                if (i >= MAX_WORKSPACES) {
+                if (i >= MAX_WORKSPACES || i >= this._thumbnails.length) {
                     break;
                 }
             } // col loop
-            if (i >= MAX_WORKSPACES) {
+            if (i >= MAX_WORKSPACES || i >= this._thumbnails.length) {
                 break;
             }
             y += thumbnailHeight + spacing;
@@ -880,6 +904,10 @@ const ThumbnailsBox = new Lang.Class({
         childBox.x2 = (indicatorX2 ? indicatorX2 : (indicatorX1 + thumbnailWidth)) + indicatorLeftFullBorder;
         childBox.y1 = indicatorY1 - indicatorTopFullBorder;
         childBox.y2 = (indicatorY2 ? indicatorY2 : (indicatorY1 + thumbnailHeight)) + indicatorBottomFullBorder;
+        if (!this._animatingIndicator) {
+          this._indicatorX = indicatorX1;
+          this._indicatorY = indicatorY1;
+        }
         this._indicator.allocate(childBox, flags);
 
 
@@ -978,24 +1006,44 @@ function overrideWorkspaceDisplay() {
     wvStorage._init = WorkspacesView.WorkspacesView.prototype._init;
     WorkspacesView.WorkspacesView.prototype._init = function () {
         wvStorage._init.apply(this, arguments);
-        Main.overview.connect('scroll-event', Lang.bind(this, function _horizontalScroll(actor, event) {
-                // same as the original, but for LEFT/RIGHT
-                if (!actor.mapped)
-                    return false;
-                let wsIndex =  global.screen.get_active_workspace_index();
+        Main.overview.connect('scroll-event', Lang.bind(this, _scrollHandler));
+        /* FelipeMarinho97 - <felipevm97@gmail.com>:
+         *
+         * This function **_scrollHandler**, uses a exported function
+         * global.screen.workspace_grid.actionMoveWorkspace.
+         * For controlling scroll-direction, we have two options:
+         *   1 - create two different handlers and choose the right one according
+         * to the value of the "scroll-direction" option.
+         *   2 - let the actionMoveWorkspace function do all the job.
+         *
+         * If we put the horizontal or vertical logic inside two different handlers,
+         * there will be no way to other extensions use this feature.
+         * They will have to implement their own handlers too. Because of it,
+         * I decided that is better delegate all the necessary logic to the exported function.
+         * So, now using a generic scroll handler (much like the original gnome-shell handler),
+         * its possible to achieve the desired funcionality.
+         *
+         * This decision eventually made the code needed for integration with
+         * other extensions very reduced.
+         */
+        function _scrollHandler (actor, event) {
+            // same as the original, but for TOP/DOWN on grid
+            let wsIndex = global.screen.get_active_workspace_index();
 
-                switch (event.get_scroll_direction()) {
-                    case Clutter.ScrollDirection.UP:
-                        global.screen.workspace_grid.actionMoveWorkspace(wsIndex-1);
-                        return true;
-                    case Clutter.ScrollDirection.DOWN:
-                        global.screen.workspace_grid.actionMoveWorkspace(wsIndex+1);
-                        return true;
-                }
+            switch (event.get_scroll_direction()) {
+                case Clutter.ScrollDirection.UP:
+                    global.screen.workspace_grid.actionMoveWorkspace(Meta.MotionDirection.UP);
+                    return Clutter.EVENT_STOP;
+                case Clutter.ScrollDirection.DOWN:
+                    global.screen.workspace_grid.actionMoveWorkspace(Meta.MotionDirection.DOWN);
+                    return Clutter.EVENT_STOP;
+            }
 
-                return false;
-            }));
+            return Clutter.EVENT_PROPAGATE;
+        }
     };
+
+
 
     // 2. Replace workspacesDisplay._thumbnailsBox with my own.
     // Start with controls collapsed (since the workspace thumbnails can take
@@ -1044,7 +1092,7 @@ function overrideWorkspaceDisplay() {
     tbStorage._getAlwaysZoomOut = OverviewControls.ThumbnailsSlider.prototype._getAlwaysZoomOut;
     OverviewControls.ThumbnailsSlider.prototype._getAlwaysZoomOut = function () {
         // *Always* show the pager when hovering or during a drag, regardless of width.
-        let alwaysZoomOut = this.actor.hover ||  this.inDrag;
+        let alwaysZoomOut = this.actor.hover ||  this._inDrag;
 
         // always zoom out if there is a monitor to the right of primary.
         if (!alwaysZoomOut) {
@@ -1088,8 +1136,8 @@ function unoverrideWorkspaceDisplay() {
     WorkspacesView.WorkspacesView.prototype._init = wvStorage._init;
     for (let i = 0; i < wD._workspacesViews.length; ++i) {
         let wV = wD._workspacesViews[i];
-        if (wV._horizontalScroll) {
-            wV.disconnect(wV._horizontalScroll);
+        if (wV._scrollHandler) {
+            wV.disconnect(wV._scrollHandler);
         }
     }
 
@@ -1110,6 +1158,14 @@ function unoverrideWorkspaceDisplay() {
     OverviewControls.ThumbnailsSlider.prototype._getAlwaysZoomOut = tbStorage._getAlwaysZoomOut;
 
     refreshThumbnailsBox();
+}
+
+/******************
+* Sets org.gnome.shell.overrides.dynamic-workspaces schema to false
+*******************/
+function disableDynamicWorkspaces() {
+    let settings = global.get_overrides_settings();
+    settings.set_boolean('dynamic-workspaces', false);
 }
 
 /******************
@@ -1165,6 +1221,8 @@ function modifyNumWorkspaces() {
     // this forces the workspaces display to update itself to match the new
     // number of workspaces.
     global.screen.notify('n-workspaces');
+
+    disableDynamicWorkspaces();
 }
 
 function unmodifyNumWorkspaces() {

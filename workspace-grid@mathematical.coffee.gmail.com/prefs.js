@@ -37,15 +37,17 @@ const ExtensionUtils = imports.misc.extensionUtils;
 const Me = ExtensionUtils.getCurrentExtension();
 const Convenience = Me.imports.convenience;
 
-const KEY_ROWS = 'num-rows';
-const KEY_COLS = 'num-columns';
-const KEY_WRAPAROUND = 'wraparound';
-const KEY_WRAP_TO_SAME = 'wrap-to-same';
-const KEY_MAX_HFRACTION = 'max-screen-fraction';
-const KEY_MAX_HFRACTION_COLLAPSE = 'max-screen-fraction-before-collapse';
-const KEY_SHOW_WORKSPACE_LABELS = 'show-workspace-labels';
-const KEY_SHOW_WORKSPACE_THUMBNAILS = 'show-workspace-thumbnails';
-const KEY_RELATIVE_WORKSPACE_SWITCHING ="relative-workspace-switching";
+var KEY_ROWS = 'num-rows';
+var KEY_COLS = 'num-columns';
+var KEY_WRAPAROUND = 'wraparound';
+var KEY_WRAP_TO_SAME = 'wrap-to-same';
+var KEY_WRAP_TO_SAME_SCROLL = 'wrap-to-same-scroll';
+var KEY_MAX_HFRACTION = 'max-screen-fraction';
+var KEY_MAX_HFRACTION_COLLAPSE = 'max-screen-fraction-before-collapse';
+var KEY_SHOW_WORKSPACE_LABELS = 'show-workspace-labels';
+var KEY_RELATIVE_WORKSPACE_SWITCHING ="relative-workspace-switching";
+var KEY_SCROLL_DIRECTION = 'scroll-direction';
+var KEY_SHOW_WORKSPACE_THUMBNAILS = 'show-workspace-thumbnails';
 
 function init() {
     Convenience.initTranslations();
@@ -93,8 +95,15 @@ const WorkspaceGridPrefsWidget = new GObject.Class({
         this._sameRowCol = this.addBoolean(
             _(" ... and wrap to the same row/col (as opposed to the next/previous)?"),
             KEY_WRAP_TO_SAME);
+        this._sameRowColScroll = this.addBoolean(
+            _("     ... wrap to same also for mouse scrolling?"),
+            KEY_WRAP_TO_SAME_SCROLL);
+        this._sameRowColScroll.set_sensitive(this._sameRowCol.active);
         toggle.connect('notify::active', Lang.bind(this, function(widget) {
             this._sameRowCol.set_sensitive(widget.active);
+        }));
+        this._sameRowCol.connect('notify::active', Lang.bind(this, function(widget) {
+            this._sameRowColScroll.set_sensitive(widget.active);
         }));
 
         let bt_labels = this.addBoolean(_("Show workspace labels in the switcher?"),
@@ -104,7 +113,11 @@ const WorkspaceGridPrefsWidget = new GObject.Class({
             bt_labels.set_sensitive(false);
         }
 
-        let lb_thumbnails = this.addBoolean(_("Show workspace thumbnails labels in the switcher?"),
+        this.addTextComboBox("Scroll Direction: ", KEY_SCROLL_DIRECTION,
+            [ { name: "Horizontal", value: "horizontal"},
+              { name: "Vertical", value: "vertical" } ]);
+
+        let lb_thumbnails = this.addBoolean(_("Show workspace thumbnails in the switcher?"),
             KEY_SHOW_WORKSPACE_THUMBNAILS);
 
         this._state_labels_before_thumbs_selected = bt_labels.get_state();
@@ -232,6 +245,24 @@ const WorkspaceGridPrefsWidget = new GObject.Class({
             }));
         }
         return this.addRow(text, hscale, true);
+    },
+
+    addTextComboBox: function (text, key, options) {
+      let item = new Gtk.ComboBoxText();
+
+      for (let i = 0; i < options.length; i++ ) {
+        item.append_text(options[i].name);
+        if (options[i].value === this._settings.get_string(key))
+              activeOption = i;
+      }
+      item.set_active(activeOption);
+
+      item.connect('changed', Lang.bind(this, function () {
+        let activeItem = item.get_active();
+        this._settings.set_string(key, options[activeItem].value);
+      }));
+
+      return this.addRow(text, item);
     },
 
     addItem: function (widget, col, colspan, rowspan) {
